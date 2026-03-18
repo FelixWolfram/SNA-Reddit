@@ -1,0 +1,867 @@
+---
+title: "Reddit Hyperlink Netzwerk Analyse"
+subtitle: "Analyse von Community-Strukturen und Interaktionen auf Reddit"
+date: "`r Sys.Date()`"
+author: "Felix Wolfram - 6684174"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: flatly
+    highlight: tango
+    fig_caption: true
+    df_print: paged
+bibliography: references.bib   
+lang: de
+always_allow_html: true
+header-includes:
+  - \usepackage{float}  
+  - \usepackage{fvextra} 
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}} 
+---
+\clearpage
+
+# Einleitung
+## Motivation
+Die Verbreitung von Informationen und die Entstehung von Meinungen wurde durch die Etablierung Sozialer Medien grundlegend transformiert. Bei Reddit handelt es sich um ein soziales Netzwerk, bei welchem die Nutzer in sogenannten “Subreddits“ miteinander interagieren. Bei diesen Subreddits handelt es sich um thematisch voneinander abgegrenzte Communities, welche durch wechselseitge Verlinkungen auf andere Subreddits miteinander in Verbindung stehen. Hierdurch entsteht ein komplexes Netzwerk aus Themenbezügen und Informationsflüssen. Die Analyse dieser Netzwerkstruktur verspricht daher interessante Einblicke in die grundlegenden Kommunikationsstrukturen und die thematische Vernetzung dieses Systems.
+
+## Problemstellung
+Um die Dynamik des Reddit-Hyperlink-Netzwerks zu verstehen, ist eine strukturierte Analyse der Interaktionen zwischen Subreddits erforderlich. Aufgrund der Größe und Komplexität des Datensatzes lässt sich die Bedeutung einzelner Subreddits oder thematischer Gruppen nicht unmittelbar erkennen. Daher ist eine systematische herangehensweise notwendig, um zentrale Akteure, relevante Verbindungsmuster und ausgeprägte Communities zu identifizieren. Vor diesem Hintergrund ergibt sich folgende Forschungsfrage:
+"Welche Subreddits besitzen die größte Bedeutung für die thematische Vernetzung im Reddit-Hyperlink-Netzwerk, und wie prägen Communities die Struktur dieser Vernetzung?"
+
+## Zielsetzung
+Ziel dieser Arbeit ist es, die zentralen Communities des Reddit-Hyperlink-Netzwerks zu identifizieren und deren Interaktionen systematisch zu untersuchen. Hierzu werden verschiedene Netzwerkmetriken berechnet und visualisiert, um Struktur, Dynamik und Muster der Vernetzung zwischen Subreddits sichtbar zu machen. Im Mittelpunkt steht dabei die Frage, wie Subreddits über Hyperlinks miteinander verbunden sind und welche Gruppen dabei eine besonders zentrale Rolle einnehmen.
+
+## Methodik
+Zur Erreichung der Zielsetzung wird der Reddit-Hyperplink-Datensatz zunächst gefiltert und es wird eine geeignetete Netzwerkstruktur herbeigeführt. Anschließend wird sowohl ein gerichteter als auch ein ungerichteter Graph erstellt, um unterschiedliche Aspekte der Subreddit-Verlinkungen erfassen zu können. Mithilfe eines Community-Detection-Algorithmus werden thematische Cluster innerhalb des Netzwerks identifiziert. Darauf aufbauend werden grundlegende Netzwerkmetriken wie Dichte, Durchschnittsgrad und Betweenness quantitativ berechnet, um durch eine Interpretation dieser Kennzahlen zentrale Strukturen und Muster des Netzwerks qualitativ zu charakterisieren. Alle Schritte werden nachvollziehbar dokumentiert und durch Visualisierungen ergänzt, um komplexe Zusammenhänge anschaulich darstellen zu können und zentrale Akteure sichtbar zu machen.
+
+## Aufbau der Arbeit
+Die Arbeit ist in drei Hauptkapitel gegliedert. Nach der Einleitung in Kapitel 1 stellt Kapitel 2 die Analyse des Netzwerks dar. In diesem Kapitel wird der Datensatz vorgestellt, der Graph aufgebaut und zentrale Analyseschritte durchgeführt. Kapitel 3 fasst die wesentlichen Ergebnisse zusammen, diskutiert diese im Kontext der Forschungsfrage und gibt einen Ausblick auf mögliche weiterführende Untersuchungen.
+
+
+
+# Netzwerkanalyse
+
+## Datensatz
+
+Der in dieser Analyse verwendete Datensatz stammt aus (@kumar2018community) und beschreibt das Hyperlink-Netzwerk der Communities auf der Plattform Reddit. Die zugrunde liegende Studie („Community Interaction and Conflict on the Web“) untersucht die Interaktionen und Konflikte zwischen thematisch abgegrenzten Subreddits anhand von Hyperlinks, die im Textkörper von Beiträgen gesetzt wurden.
+
+Der Datensatz umfasst Interaktionen über einen Zeitraum von 2,5 Jahren (Januar 2014 bis April 2017) und dokumentiert gerichtete Verbindungen, bei denen eine Community auf eine andere verweist. Zusätzlich beinhaltet er eine Sentiment-Analyse der verlinkenden Texte sowie Metadaten zu den Eigenschaften der jeweiligen Posts.
+
+## Aufbau des Reddit-Hyperlink-Graphen
+
+```{r setup, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(igraph)
+library(ggplot2) 
+library(ggraph)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(data.table) 
+library(visNetwork)
+library(ggstatsplot)
+library(RColorBrewer)
+library(kableExtra)
+library(scales)
+library(highcharter)
+library(viridis)
+library(treemapify)
+library(plotly)
+library(ggrepel)
+library(stringr)  
+```
+
+```{r load data, echo=FALSE}
+options(timeout = 600) # längeres Timeout für den Download setzen
+
+# Pfade definieren (URL und Zielort)
+url <- "https://snap.stanford.edu/data/soc-redditHyperlinks-body.tsv" 
+dest <- "soc-redditHyperlinks-body.tsv"
+
+# Download starten, wenn die Datei noch nicht existiert
+if (!file.exists(dest)) {
+  message("Datei nicht gefunden. Starte Download...")
+  download.file(url, destfile = dest, mode = "wb")
+} else {
+  message("Datei bereits vorhanden. Kein Download notwendig...")
+}
+
+```
+
+Nachdem der Datensatz runtergeladen wurde un nun lokal vorhanden ist, wird der Datensatz eingelesen.
+
+```{r read data}
+dt <- fread(dest)
+names(dt) # Spaltennamen anzeigen
+ncol(dt)  # Anzahl der Spalten
+nrow(dt)  # Anzahl der Zeilen
+```
+
+Der Datensatz enthält `r nrow(dt)` Zeilen und `r ncol(dt)` Spalten:
+SOURCE_SUBREDDIT, TARGET_SUBREDDIT, POST_ID, TIMESTAMP, LINK_SENTIMENT und PROPERTIES, wobei nur die drei Spalten SOURCE_SUBREDDIT, TARGET_SUBREDDIT und LINK_SENTIMENT für die Analyse relevant sind. SOURCE_SUBREDDIT und TARGET_SUBREDDIT geben jeweils die Quell- und Ziel-Subreddits der Verlinkung an, während LINK_SENTIMENT die Stimmung der Verlinkung beschreibt, wobei -1 eine negative und 1 eine positive Stimmung darstellt. Bevor mit der Analyse begonnen werden kann, wird überprüft, ob einige fehlende Werte im Datensatzes vorhanden sind und diese notfalls bereinigt.
+
+```{r clean data}
+# filter for nas
+dt <- dt[!is.na(LINK_SENTIMENT) & !is.na(SOURCE_SUBREDDIT) & !is.na(TARGET_SUBREDDIT)] # auf NA Werte filtern
+dt <- dt[SOURCE_SUBREDDIT != "" & TARGET_SUBREDDIT != ""]  # auf leere Strings filtern
+nrow(dt)  # Anzahl der Zeilen nach der Bereinigung
+
+# positive und negative Verlinkungen zählen
+sentiment_count <- dt[, .N, by = LINK_SENTIMENT]  # gruppiert nach LINK_SENTIMENT und zählt die Anzalhl der Vorkommen
+# Zeilen auswählen (alle), ".N" = Anzahl Zeilen zählen, "by" = Gruppierung definieren
+```
+```{r inspect cleaned data, echo=FALSE}
+head(dt) %>%
+  # PROPERTIES Spalte für Visualisierung kürzen, da sie riesig ist und im folgenden auch nicht relevant ist
+  mutate(PROPERTIES = str_trunc(as.character(PROPERTIES), 20, side = "right")) %>%
+  kable(
+    format = ifelse(knitr::is_latex_output(), "latex", "html"), 
+    caption = "Reddit Datensatz",
+    booktabs = TRUE
+  ) %>%
+  kable_styling(
+    full_width = FALSE, 
+    bootstrap_options = c("striped", "hover", "condensend"),
+    latex_options = c("striped", "hold_position", "scale_down")
+    )
+```
+
+Da die Anzahl der Zeilen vor und nach der Bereinigung identisch sind, sind keine fehlenden Werte im Datensatz vorhanden. In dem Datensatz existieren aus den `r nrow(dt)` Verlinkungen zwischen jeweils zwei Subreddits dabei `r sentiment_count[LINK_SENTIMENT == 1, .N]` positive und `r sentiment_count[LINK_SENTIMENT == -1, .N]` negative Verlinkungen. zwischen zwei Subreddits.  Die Spalte PROPERTIES enthält eine Reihe an Metadaten zu den Verlinkungen, die jedoch für die Netzwerkstruktur keine Relevanz besitzen und daher für die folgende Analalyse ignoriert werden. Gleiches wird mit dem Zeitstempel der Interkation sowie der Id des Posts getan, da auch diese beiden Spalten für die nachfolgende Analyse nicht benötigt werden.
+
+Mit diesen Daten kann nun der Reddit-Hyperlink-Graph erstellt werden. Hierzu wird zunächst eine Kantenliste erstellt, in welcher jede Verlinkung von SOURCE_SUBREDDIT zu TARGET_SUBREDDIT als gerichtete Kante repräsentiert wird. Jede Kante erhält ein Gewicht von 1, sodass bei mehrfachen Verlinkungen zwischen denselben Subreddits die Gewichte anschließend summiert werden können.
+
+```{r build edge list}
+# Kanten liste erstellen, indem alle Zeilen genommen werden und von SOURCE_SUBREDDIT zu TARGET_SUBREDDIT verlinkt wird
+edges <- dt[, .(
+  from = SOURCE_SUBREDDIT,
+  to   = TARGET_SUBREDDIT,
+  weight = 1, # jeder Link zählt als 1, sodass später summiert werden kann
+  sentiment = LINK_SENTIMENT
+)]
+```
+
+Aus dieser Kantenliste kann nun der gerichtete Graph erstellt werden. Der Graph wird dabei vereinfacht, indem doppelte Kanten und Schleifen entfernt werden. Schleifen sind Kanten, welche von einem Knoten auf sich selbst verlinken und sind nicht erwünscht, da bei der folgenden Analyse Interaktionen zwischen Subreddits und Communities betrachtet werden sollen und diese Selbstverlinkungen somit keine Relevanz besitzen. Doppelte Kanten werden entfernt, indem die Gewichte der Kanten summiert werden. Somit repräsentiert das Gewicht jeder Kante die Anzahl der Verlinkungen zwischen den jeweiligen zwei Subreddits.
+
+```{r create graph}
+g <- graph_from_data_frame(edges, directed = TRUE) # gerichteter Graph
+
+# Graph vereinfachen, indem mehrfache Kanten und Schleifen entfernt werden und die Gewichte summiert werden
+g <- igraph::simplify(
+  g,
+  remove.multiple = TRUE,  # doppelte Kanten entfernen 
+  remove.loops    = TRUE,  # Schleifen entfernen (Knoten, die auf sich selbst verlinken)
+  edge.attr.comb  = list(weight = "sum", sentiment = "mean", "ignore")
+)
+```
+
+Um einen ersten Eindruck von der Struktur des erstellten Graphen zu erhalten, werden die Anzahl der Knoten und Kanten inspiziert. Hierdurch kann einfach ein erster Überblick über die Größe und Komplexität des Netzwerks gewonnen werden.
+
+```{r inspect graph}
+vcount(g)  # Anzahl der Knoten
+ecount(g)  # Anzahl der Kanten
+```
+
+Der erstellte Reddit-Hyperlink-Graph besteht aus `r format(vcount(g), scientific = FALSE, big.mark = ".", decimal.mark = ",")` Knoten und `r format(ecount(g), scientific = FALSE, big.mark = ".", decimal.mark = ",")` gerichteten Kanten, womit es eine Größe besitzt, bei welcher man bereits komplexe Strukturen und Erkentnisse erwarten kann.
+
+```{r calculate density}
+g_density <- edge_density(g)  # Netzwerkdichte berechnen
+g_density
+```
+
+Trotz dass die Anzahl der Kanten im Graph relativ hoch ist, ist die Dichte mit `r format(round(g_density, digits=6), scientific = FALSE, big.mark = ".", decimal.mark = ",")` des Netzwerks verhältnismäßig gering. Die Dichte eines Netzwerks gibt an, wie viele der möglichen Kanten tatsächlich vorhanden sind. Das bedeuet in diesem Fall, dass `r format(round(g_density * 100, digits=4), scientific=FALSE, big.mark=".", decimal.mark = ",")`% aller möglichen Kanten in diesem Graphen verhanden sind. Eine so geringe Dichte signalisiert, dass das Netzwerk locker verbunden ist. Dies ist typisch bei einem großen realen Netzwerk wie das World Wide Web oder soziale Netzwerke (wie auch bei diesem Reddit-Hyperlink Netzwerk).
+
+Oftmal sind hier einige zentrale Knoten (sogenannte "Hubs") stark mit anderen Knoten verbunden sind, während der Großteil jedoch dünn direkt vernetzt bleibt, da wie in diesem Beispiel von Reddit insbesondere kleine Subreddits nicht mit jeglichem anderen Subreddit verbunden sein werden.
+
+Der Graph soll nun zuerst auf seine größte Komponente gefiltert werden, da er aktuell aus vielen Komponenten besteht. Die Knoten innerhalb einer Komponente sind miteinander verbunden, besitzen jedoch keine Kanten zu Knoten außerhalb dieser Komponente.
+
+```{r components detection}
+# Komponenten des Graphen bestimmmen
+comp <- components(g) 
+length(comp$csize) 
+sort(comp$csize, decreasing = TRUE)[1:10] 
+```
+
+Wir erkennen in diesem Fall `r length(comp$csize)` Komponenten im Graphen. Die größte Komponente besteht aus `r format(sort(comp$csize, decreasing = TRUE)[1], scientific = FALSE, big.mark = ".", decimal.mark = ",")` Knoten, während weitere Komponenten maximal `r sort(comp$csize, decreasing = TRUE)[2]` Knoten umfassen. Hieraus kann man schließen, dass ein Großteil der Subreddits in einer großen, zusammenhängenden Struktur vernetzt sindd, während einige kleinere Subreddits isoliert bleiben oder Interaktion ausschließlich in einer kleinen Gruppen stattfindet. In der folgenden Analyse soll sich auf die größte Komponente beschränkt werden, um die Komplexität der Analysen zu reduzieren und sich auf die zentralen Akteure und wichtigsten Kommunikationsstrukturen zu fokussieren.
+
+```{r filter for largest component}}
+# Subgraph aus der größten Komponente erstellen
+gc_id <- which.max(comp$csize) # ID der größten Komponente
+gc <- induced_subgraph(g, which(comp$membership == gc_id)) # Subgraph ausschließlich mit Knoten der größten Komponente
+```
+
+Nachdem der Graph auf seine größte Komponente gefiltert wurde, besteht dieser nun aus `r format(vcount(gc), scientific = FALSE, big.mark = ".", decimal.mark = ",")` Knoten und `r format(ecount(gc), scientific = FALSE, big.mark = ".", decimal.mark = ",")` gerichteten Kanten. 
+Für die weitere Analyse des Netzwerks ist es nun wichtig, die Community-Struktur des Graphen zu identifizieren. Communities sind Gruppen von Knoten, die stärker miteinander verbunden sind als mit dem Rest des Netzwerks. Die Identifikation solcher Communities kann wertvolle Einblicke in die thematische Struktur und die Kommunikationsmuster innerhalb des Reddit-Hyperlink-Netzwerks liefern.
+
+Es soll nun auf diesem Graphen eine Community-Erkennung durchgeführt werden, die für die Identifikation von thematischen Clustern innerhalb des Netzwerks genutzt werden kann. Um diese Erkennung durchzuführen, muss ein ungerichteter Graph erstellt werden, da der Algorithmus ausschließlich auf einem ungerichteten Graphen funktioniert und die Richtung der Kanten für die Identifikation von vernetzen Subreddits zudem auch keine Relevanz besitzt.
+
+```{r create undirected graph}
+# ungerichteten Graphen für die Community-Erkennung erstellen
+gc_und <- as_undirected(gc, mode = "collapse",
+                        edge.attr.comb = list(
+                          weight = "sum",     # Summe der Interaktionen in beide Richtungen
+                          sentiment = "mean"  # Durchschnittliche Stimmung in beide Richtungen
+                        )) 
+```
+
+Im ungerichteten Graphen werden die Kanten in beide Richtungen zusammengefasst, indem die Gewichte summiert und die Stimmungen der Interaktionen gemittelt werden. Für die folgenden Erkennung von Communityies wird der Louvain-Algorithmus verwendet, welcher darauf abzielt, die Modularität des Netzwerks zu maximieren.
+
+Die Modularität ist ein Maß dafür, wie gut das Netzwerk in dichte Gemeinschaften unterteilt ist. Ein hoher Modularitätswert deutet darauf hin, dass die Knoten innerhalb der einzelnen Communities stark miteinander verbunden sind, während die Verbindungen zwischen Communities schwach sind.
+
+```{r community detection}
+# Community-Erkennung mit dem Louvain-Algorithmus
+set.seed(42)
+gc_com   <- cluster_louvain(gc_und) 
+length(gc_com) # Anzahl erkannter Communities
+
+modularity(gc_com)
+# desto höher der Wert, desto stärker die Gemeinschaftsstruktur (min=-0.5, max = 1)
+
+# die Community-Zugehörigkeit als Vertex-Attribut speichern
+V(gc_und)$community <- membership(gc_com)
+```
+
+Der Louvain-Algorithmus identifiziert `r length(gc_com)` Communities im Reddit-Hyperlink-Netzwerk. Die berechnete Modularität für diese Zerlegung beträgt `r modularity(gc_com)`. Damit sind bei diesem Modularititätswert Strukturen zu erwarten, welche sich von einer zufälligen Vernetzung der Knoten unterscheidet, indem das eine signifikante Gemeinschaftsstruktur aufweist. Subreddits innerhalb derselben Community sind also vermutlich stärker miteinander vernetzt sind als mit Subreddits außerhalb ihrer Community.
+
+
+## Analyse des Reddit-Hyperlink-Netzwerks
+### Analyse allgemeiner Strukturen und Metriken
+
+Das Netzwerk wurde nun erfolgreich aufgebaut, nach seiner größten Komponente gefilter und die Community-Struktur identifiziert. Im folgenden Abschnitt wird das Netzwerk visualisiert sowie verschiedene Metriken berechnet und interpretiert, um ein tieferes Verständnis über den Aufbaus und die Struktur des vorliegenden Reddit-Netzwerks zu erlangen.
+
+Um eine übersichtliche Visualisierung des Netzwerks zu ermöglichen, wird der Graph zunächst in mehrere Stufen weiter gefiltert, indem Knoten mit einem geringen Degree sowie Kanten mit niedrigen Gewichten entfernt werden. Dies dient der Reduktion der Komplexität, um die wichtigsten strukturellen Merkmale und zentralen Interaktionen hervorzuheben.
+
+```{r filter for plotting}
+deg_threshold <- 50 # schwache Verbindungen filtern
+weight_treshold <- 15 # schwache Kanten filtern
+
+deg <- igraph::degree(gc_und, mode = "all")
+
+# Graphen aufgrund des Degrees und der Kantengewichte filtern
+gc_filt <- induced_subgraph(gc_und, which(deg >= deg_threshold))
+gc_strong <- subgraph_from_edges(gc_filt, E(gc_filt)[weight >= weight_treshold], delete.vertices = TRUE)
+
+# erneut nur die größte Komponente betrachten und durch das Filtern enstandene einzelne Komponenten entfernen
+comp_strong <- components(gc_strong) 
+gc_strong_id <- which.max(comp_strong$csize) 
+gc_strong_filtered <- induced_subgraph(gc_strong, which(comp_strong$membership == gc_strong_id)) 
+
+# tabellarischer Vergleich der Graph Größen an verschiedenen Stufen der Filterung
+graph_sizes <- data.frame(
+  Stage = c("Originaler Graph", "Größte Komponente", "Degree Filterung", "Gewicht Filterung", "Finale Filterung"),
+  Nodes = c(vcount(g), vcount(gc), vcount(gc_filt), vcount(gc_strong), vcount(gc_strong_filtered)),
+  Edges = c(ecount(g), ecount(gc), ecount(gc_filt), ecount(gc_strong), ecount(gc_strong_filtered))
+)
+```
+```{r graph sizes table, echo=FALSE}
+graph_sizes %>%
+  kable(
+    format = ifelse(knitr::is_latex_output(), "latex", "html"), 
+    caption = "Graph Größen an verschiedenen Stufen der Filterung",
+    booktabs = TRUE
+  ) %>%
+  kable_styling(
+    full_width = FALSE, 
+    bootstrap_options = c("striped", "hover", "condensend"),
+    latex_options = c("striped", "hold_position", "scale_down")
+    )
+
+```
+
+Für die Filterung nach dem Mindestgrad wurde ein Schwellenwert `r deg_threshold` festgelegt, während anschließend alle Kanten mit einem Gewicht unter `r weight_treshold` entfernt werden und erneut nach nach der größten Komponente gefiltert wird. Die Tabelle zeigt die Größe des Graphen über die verschiedenen Filterungsstufen hinweg und veranschaulicht die drastische Verkleinerung des Netzwerks. 
+
+Während der ursprüngliche Graph eine beträchtliche Größe aufwies, führte schon die erste Filterung nach dem Grad zu einer Reduktion von `r (1-round(vcount(gc_filt) / vcount(gc), digits = 2))*100`% der Knoten und `r (1-round(ecount(gc_filt) / ecount(gc), digits = 2))*100`% der Kanten. Dies bestätigt die bereits vermutete Heterogenität des Netzwerkes, bei welchem nur ein kleiner Teil der Knoten zentral und aktiv ist. Die Filterung nach dem Gewicht führte, bezogen auf den bereits reduzierten Graphen, zu einer weiteren Reduktion von `r (1-round(vcount(gc_strong) / vcount(gc_filt), digits = 2))*100`% der Knoten und `r (1-round(ecount(gc_strong) / ecount(gc_filt), digits = 2))*100`% der Kanten. Der finale Graph besteht nur noch aus `r vcount(gc_strong_filtered)` Knoten und `r ecount(gc_strong_filtered)` Kanten, was eine erhebliche Reduktion der ursprünglichen Netzwerkgröße darstellt. Dieses Netzwerk kann nun visualisiert werden.
+
+Für diese Visualsisierung wird zuerst der Datensatz für die Knoten erstellt, wobei die Attribute des Graphen verschiedenen visuellen Eigenschaften zugeordnet werden. Ebenso wird der Datensatz für die Kanten aus den Kanten des Graphen erstellt. Das Breite der Verbindungen wird nach dem Kantengewicht skaliert und visualisiert damit die Stärke der Verbindungen zwischen Subreddits.
+
+```{r build dataframes for interactive graph}
+# Knoten für den Plot definieren
+nodes_df <- data.frame(
+  id    = V(gc_strong_filtered)$name,
+  label = V(gc_strong_filtered)$name,
+  group = V(gc_strong_filtered)$community,
+  value = degree(gc_strong_filtered)
+)
+
+# Kanten aus dem Graphen extrahieren
+edges_df <- igraph::as_data_frame(gc_strong_filtered, what = "edges")
+edges_df$width <- scales::rescale(edges_df$weight, to = c(1, 10))
+```
+
+Nachdem die Datensätze nun erstellt sind, kann das Reddit-Netzwerk visualisiert werden. Dies geschieht durch visNetwork, womit interaktive Netzwerkvisualisierungen möglich, um die Strukturen des Netzwerkes explorativ zu untersuchen.
+
+```{r plot interactive graph}
+# interaktives Netzwerk mit visNetwork erstellen
+r_network <- visNetwork(nodes_df, edges_df) %>%
+  visOptions(
+    highlightNearest = TRUE,
+    nodesIdSelection = TRUE
+  ) %>%
+  visPhysics(
+    solver = "forceAtlas2Based",
+    stabilization = TRUE,
+    minVelocity = 0.1,
+    repulsion = list(
+      centralGravity = 0.001, 
+      springLength   = 200,
+      springConstant = 0.01
+    )
+  )
+
+r_network
+```
+
+Die Visualisierung des gefilterten Netzwerks \textit{(nur in der html-Version sichtbar)} zeigt die zuvor quantitativ festgestellten Eigenschaften deutlich. Bei dem Netzwerk ist eine eindeutige, modulare Struktur erkennbar. Es sind einige Cluster zu sehen, welche stärker miteinander vernetzt sind, oftmals mit einem oder mehrern zentralen Knoten (Hubs), die viele Verbindungen zu anderen Knoten der Gemeinschaft aufweisen und Gemeinschaften miteinander verbinden.
+
+Es ist erkennbar, dass insbesondere eine dominierde (magenta farbene Gemeinschaft) als zentrales Verteilungs- und Sammelzentrum des Netzwerks agiert. Es sind zwei besonders stark vernetze Knoten in diesem Gemeinschaften erkennbar, welche die meisten Verbindungen zu anderen Knoten besitzen, sowohl zu Knoten in derselben Gemeinschaft, aber auch zu Knoten anderer Gemeinschaften, insbesondere deren Hubs. Somit verbindet nicht nur die zentrale magenta Farbene Gemeinschaft das restliche Netzwerk, sondern insbesondere zwei zentrale Knoten mit einem hohen Grad, womit sie eine wichtige Rolle im gesamtgesellschaftlichen Informationsfluss des Netzwerks spielen.
+
+Um die visuell festgestellte Struktur des Graphen quantitativ zu untermauern, werden nochmals die wichtigsten allgemeinen topologischen Kennzahlen berechnet und interpretiert. Hierfür wird der ungerichtete Graph verwendet, um die Konsistenz mit der zuvor durchgeführten Community-Detection sicher zu stellen und die Interpretationen der allgemeinen Metriken des Netzwerks zu vereinfachen. Zuerst soll die Größe und grundlegenden Konnektivität des Netzwerks näher betrachtet werden.
+
+```{r general metrics for size and connectivity, cache=TRUE}
+# Durchmesser: längste kürzeste Pfad zwischen zwei Knoten im Netzwerk
+diameter_gc <- diameter(gc_und, weights = NA)
+diameter_gc
+
+# durchschnittliche Pfadlänge: durchschnittliche Länge der kürzesten Pfade zwischen allen Knoten im Netzwerk
+avg_path_length_gc <- mean_distance(gc_und, weights = NA)
+avg_path_length_gc
+```
+
+Der Durchmesser, welcher als längster kürzester Pfad zwischen zwei Knoten definiert ist, beträgt im Reddit-Netzwerk `r diameter_gc`, während die durschnittliche Pfadlänge nur `r avg_path_length_gc` beträgt. Dies zeigt, dass trotz der großen Größe des Netzwerks, jeder Knoten jeden anderen Knoten im durchschnitt in weniger als vier Schritten erreichen kann. Wie auch bereits durch die grafische Visualisierung des Netzwerks zu erkennen ist, ist die Vermutung hierbei, dass einige zentrale Knoten stark vernetzt sind und damit eine kurze durchschnittliche Pfadlänge ermöglichen. Folgend werden daher die Kennzahlen zur Dichte, Knotenaktivität und Konnektivität des Netzwerks untersucht, um diese Eigenschaften näher zu untersuchen.
+
+```{r general metrics for network, cache=TRUE}
+# Dichte: Verhältnis der Anzahl vorhandenen Kanten zu der aller möglichen Kanten im Netzwerk
+density_gc_und <- edge_density(gc_und) 
+density_gc_und
+
+# Degree: Anzahl der Verbindungen eines Knotens zu anderen Knoten im Netzwerk
+deg_gc <- igraph::degree(gc_und)
+avg_degree_gc <- mean(deg_gc)
+max_degree_gc <- max(deg_gc)
+avg_degree_gc
+max_degree_gc
+
+# Betweenness: wie oft ein Knoten auf den kürzesten Pfaden zwischen anderen Knoten liegt
+betweenness_gc <- betweenness(gc_und, directed = FALSE, normalized = TRUE)
+avg_betweenness_gc <- mean(betweenness_gc)
+max_betweenness_gc <- max(betweenness_gc)
+avg_betweenness_gc
+max_betweenness_gc
+```
+
+Die Dichte, welche die Anzahl der vorhandenen Kanten im Verhältnis zu der aller mgöglichen Kanten angibt, beträgt nur `r format(round(density_gc_und, digits=6), , scientific = FALSE, big.mark = ".", decimal.mark = ",")`. Dies bestätigt die zuvor festgestellte lockere Vernetzung des Netzwerks, bei welchem nur ein kleiner Bruchteil der möglichen Verbindungen tatsächlich existiert. Der durchschnittliche Grad liegt mit `r round(avg_degree_gc, digits=2)` ebenfalls auf einem niedrigen Niveau, was eine geringe lokale Vernetzung der meisten Subreddits signalisiert.
+
+Der durchschnittliche Grad liegt mit 7.13 ebenfalls auf einem niedrigen Niveau, was eine geringe lokale Vernetzung der meisten Subreddits signalisiert. Im starken Gegensatz hierzu steht jedoch der maximale Grad von `r max_degree_gc`. Diese ernorme Differenz zwischen dem Durschnitts- und Maximalgrad bestätigt die bereits vermutete Hub Struktur, da einige Knoten um ein vielfaches stärker vernetzt sind als andere. Auch die Betweenness-Zentralität untermauert diese Struktur, da auch hier eine große Differenz zwischen durchschnittlicher und maximaler Betweenness existiert, bei welcher die maximale Betweenness mit einem Faktor von etwa `r round(max_betweenness_gc / avg_betweenness_gc)` größer ist als die durchschnittliche Betweenness. Die Erkenntniss, dass ein Knoten auf `r round(max_betweenness_gc * 100, digits=1)` aller kürzesten Pfade zwischen zwei Knoten liegt zeigt ebenfalls die Wichtigkeit und Zentralität einiger Knoten. 
+
+Abschließend sollen nun noch einige allgemeine Metriken bezüglich der Community-Struktur des Netzwerks analysiert werden.
+
+```{r general metrics for communities}
+# Communities: Gruppen von Knoten, die stärker miteinander verbunden sind als mit dem Rest des Netzwerks => wie viele gibt es?
+# use leiden instead of louvain for better results?
+num_communities <- length(gc_com)
+num_communities
+
+# Clustering Coefficient: Maß für die Tendenz von Knoten, Cluster zu bilden
+clustering_coeff_gc <- transitivity(gc_und, type = "average")
+clustering_coeff_gc
+```
+
+Es ist erkennbar, dass das Reddit-Hyperlink-Netzwerk sich in `r num_communities` verschiedene Communities zerteilen lässt. Der durchschnittliche Clustering-Koeffizient, welcher die Wahrscheinlichkeit von Dreiecksverbindungen zwischen drei Knoten angibt, von `r round(clustering_coeff_gc, digits=4)` deutet auf eine Tendenz hin, dass zwei Nachbarn eines Knotens ebenfalls miteinander verbunden sind und somit Cliquenbildungen vermuten lässt. Insbesondere im Vergleich zur zuvor berechnet Modularität fällt der Clustering Koeffizient allerdings nur moderat aus. Dies könnte darauf hindeuten, dass auch in den Communities einige zentrale Hubs existieren, welche die thematische Gruppe verbinden und damit von hoher Relevanz für die jeweilige Gruppe sind.
+
+Das Ergebnis belegt zudem das sogenannte Small-World-Phänomen, welches besagt, dass ein Netzwerk gleichzeigit eine hohe lokale Vernetzung sowie gleichzeitig eine geringe globale Pfadlänge aufweist, oftmals verglichen mit einem zufällig vernetzen Graphen gleicher Größe und Dichte. Dieses Phänomen ist für ist für reale Netzwerke solcher Art typisch. Dies lässt daher vermuten, dass auch das Reddit-Hyperlink-Netzwerk solch eine Small-World-Struktur aufweist, bei welcher einige zentrale Hubs die Vernetzung des Netzwerks maßgeblich prägen. (@watts1998collective)
+
+
+
+### Analyse der Community-Struktur
+
+Nachdem nun die allgemeine topologische Struktur des Netzwerks als heterogen mit einer ausgeprägter Hub-Struktur und modular mit einer klar ersichtlichen Gemeinschaftsstruktur identifiziert wurde, soll nun die interne Struktur dieser identifizierten Module näher untersucht werden.
+
+Ziel ist die Vertiefung der Erkenntnisse zur globalen Toploogie durch die Analyse der Struktur der einzelnen Module. Um die thematischen Gruppierungen näher untersuchen zu können, werden verschiedene Metriken für jede der identifizierten Communities berechnet. Zu diesen Metriken gehören neben der Größe der Community (gemessen an deren Anzahl der Knoten) und der Dichte des Community-Neztwerks, Zentralitätsmaße wie Degree, Betweenness, Eigenvektor-Zentralität, Betweenness und Closeness. Diese Metriken werden hierbei auf dem gerichteten Graphen berechnet, da es für die Analyse der Community-Struktur relevant ist, zusätzlich die Richtung des Informationsflusses zu betrachten, um besser zu verstehen, wie verschiedene Communities miteineinander interagieren.
+
+Die Berechnung der Grad-Metriken (In, Out, All) wurden bewusst auf dem kompletten gerichteten Graphen durchgeführt, um die Berücksichtigung der Gesamtaktivität des Subreddits im gesammten Reddit-Netzwerk sicherzustellen. Es soll festgehalten werden, wie die Gemeinschaft auch mit anderen Gemeinschaften kommuniziert und welche Rolle sie dadurch im Gesamtnetzwerk einnimmt. Im Gegensatz dazu werden die pfadbasierten Metriken Betweenness, Closeness und die Eigenvektor-Zentralität nur auf dem jeweiligen Community-Subgraph berechnet, um die Kommunikationsstruktur in der jeweilige Community zu untersuchen. Durch die Betweeness kann die Kontrollfunktion von lokalen Hubs ermittelt werden, während durch die Closeness festgestellt werden kann, wie effizient und schnell sich Informationen innerhalb der Community verbreiten. Die Eigenvektor-Zentralität ergänzt diese Analyse, indem durch diese Metrik die Homogenität der Verteilung des Einflusses bewertet werden kann. Ein hoher Durchschnittswert signalisiert eine flache Hierarchie, während ein niedriger Wert auf eine steile Hierarchie, bei welcher sich der Einfluss auf einige wenige Subreddits konzentriert, hindeutet.
+
+Konkret erfolgt im Anschluss an die Bestimmung der globalen Grad-Metriken die Berechnung der verschieden weiteren Zentralitätsmaße für jede Community. Hierfür wird iterativ für jede Gemeinschaft ein induzierter Subgraph erstellt, welcher ausschließlich die Knoten der jeweiligen Community enthält. Auf Basis dieses Teilnetzwerks werden die spezifischen pfadbasierten Metriken und Eigenschaften ermittelt und abschließend in ein gesamtumfassenden Datensatz überführt.
+
+```{r analysis of components, cache=TRUE}
+# Degree für das gesamte Netzwerk berechnen (gerichtet), damit anschließend immer ein Subset genommen werden kann
+deg_all_gc  <- igraph::degree(gc, mode = "all")
+deg_in_gc   <- igraph::degree(gc, mode = "in")
+deg_out_gc  <- igraph::degree(gc, mode = "out")
+
+# Größen der Communities berechnen und sortieren
+community_sizes <- sort(sizes(gc_com), decreasing = TRUE)
+
+# Ergebnisse in Liste speichern, dann in ein Dataframe umwandeln
+com_info_list <- list()
+
+# für jede der größten Communities verschiedenste Metriken und Eigenschaften berechnen und speichern
+for (i in seq_along(community_sizes)) {
+  # Subgraph erstellen, welcher nur die Knoten der jeweiligen Community enthält
+  com_id <- names(community_sizes)[i]
+  com_nodes <- gc_com[[com_id]]
+  com_subg <- induced_subgraph(gc, com_nodes)
+
+  # Metriken berechnen
+  deg     <- deg_all_gc[com_nodes]
+  in_deg  <- deg_in_gc[com_nodes]
+  out_deg <- deg_out_gc[com_nodes]
+  betweenness <- betweenness(com_subg, directed = FALSE, normalized = TRUE)
+  eigenvector <- eigen_centrality(com_subg, directed = FALSE)$vector
+  closeness <- closeness(com_subg, mode = "all", normalized = TRUE)
+  
+  # Ergebnisse speichern
+  com_info_list[[i]] <- data.frame(
+    rank              = i,
+    community_id      = com_id,
+    top_node          = names(deg)[which.max(deg)],
+    size              = as.numeric(community_sizes[i]),
+    cum_percent       = sum(as.numeric(community_sizes[1:i])) / sum(as.numeric(community_sizes)),
+    density           = edge_density(com_subg),
+    max_degree        = max(deg, na.rm = TRUE),
+    avg_degree        = mean(deg, na.rm = TRUE),
+    avg_in_deg        = mean(in_deg, na.rm = TRUE),
+    avg_out_deg       = mean(out_deg, na.rm = TRUE),
+    max_betweenness   = max(betweenness, na.rm = TRUE),
+    avg_betweenness   = mean(betweenness, na.rm = TRUE),
+    avg_eigenvector   = mean(eigenvector, na.rm = TRUE),
+    avg_closeness     = mean(closeness, na.rm = TRUE),
+    avg_positivy      = mean(E(com_subg)$sentiment, na.rm = TRUE)
+  )
+}
+
+# Liste aus Dataframes in ein einziges Dataframe umwandeln
+com_info_df_all <- do.call(rbind, com_info_list)
+```
+```{r show community metrics table, echo=FALSE}
+com_info_df_all[1:30, ] %>%
+  kable(
+    format = ifelse(knitr::is_latex_output(), "latex", "html"), 
+    caption = "Top-N Community Data",
+    digits = 4,
+    linesep = "",
+    booktabs = TRUE
+  ) %>%
+  kable_styling(
+    full_width = FALSE, 
+    font_size = 10,
+    bootstrap_options = c("striped", "hover", "condensend"),
+    latex_options = c("striped", "hold_position", "scale_down")
+  ) %>%
+  # Rang hervorheben
+  column_spec(1, bold = TRUE)
+```
+
+Die Tabelle zeigt den Datensatz mit den Ergebnissen dieser berechneten Metriken für die jeweilige identifizierten Community im Reddit-Hyperlink-Netzwerk, wobei aus Gründen der Übersichtlichkeit nur die ersten 30 Zeilen angezeigt werden. Jede Zeile stellt eine Gemeinschaft dar, für welche in den Spalten diverse Kennzahlen und Eigenschaften berechnet wurden.
+
+Es wurde für jede Community zudem der Knoten mit dem höchsten Grand ermittelt und dessen Namen gespeichert. Aufgrund der vorherigen Analysen und den großen Differenzen zwischen dem durchschnittlichen und dem maximalen Grad wird angenommen, dass dieser Knoten einen lokalen Hub darstellt, welcher die Community miteinander verbindet. Es liegt daher nahe, dass es sich bei diesem Knoten in einem sozialen Netzwerk wie Reddit um ein Subreddit handelt, welcher semantisch repräsentativ für das Überthema Gemeinschaft ist. In folgenden Analysen wird daher der Name dieses zentralen Hubs zur identifizierenden Benennung der jeweiligen Community und ihres Themenbereichs verwendet.
+
+Um die Verteilung der Subreddit-Gruppen im Netzwerk zu verstehen, beginnt Analyse mit der Untersuchung der Größenverteilung der Communities durch die Erstellung einer kumulativen Abdeckungskurve (Pareto-Kurve), basierend auf diesem Datensatz. Dies geschieht mit einem Flächenplot, welcher auf der x-Achse den Rang der Community (bezogen auf die Größe) zeigt und auf der y-Achse den kumulierten Anteil am Gesamtnetzwerk in Prozent visualisiert. Es wird zusätzlich eine Hilfslinie bei 80% eingefügt, um das Pareto-Prinzip zu verdeutlichen, welches besagt, dass oft 80% der Ergebnisse mit 20% des Aufwands erreicht werden können. Bezogen auf den vorliegenen Fall könnte ein kleiner Teil der Communities einen großen Teil des Gesamtnetzwerks ausmachen. 
+
+```{r build perator curve}
+pareto_area <- ggplot(com_info_df_all, aes(x = rank, y = cum_percent)) +
+  geom_area(fill = "#69b3a2", alpha = 0.6) +
+  geom_line(color = "#404080", size = 1) +
+  
+  # Hilfslinie bei 80%
+  geom_hline(yintercept = 0.8, linetype = "dashed", color = "red", alpha = 0.5) +
+  annotate("text", x = max(com_info_df_all$rank)*0.8, y = 0.78, label = "80% Abdeckung", color = "red", size = 3) +
+
+  scale_y_continuous(labels = scales::percent) +  # y-Achse in Prozent angeben
+  labs(
+    title = "Kumulative Abdeckung des Netzwerks durch Communities",
+    x = "Anzahl der Communities (sortiert nach Größe)",
+    y = "Anteil am Gesamtnetzwerk (kumuliert)"
+  ) +
+  theme_minimal() + 
+  theme(
+    text = element_text(size = 12),
+    plot.title = element_text(hjust = 0.5, size = 14)
+  )
+```
+```{r plot pareto curve, echo=FALSE}
+if (knitr::is_latex_output()) {
+  pareto_area
+} else {
+  ggplotly(pareto_area)
+}
+```
+
+Die Pareto-Kurve zeigt, dass wie schon vermutet bereits ein kleine Anzahl von Communities ein großer Anteil des Gesamtnetzwerkes abdeckt. Bereits die größten 18 Communities machen etwa 80% des gesamten Netzwerks aus, während gleichzeitig die kleinsten 30 Communities nur etwa 1% des gesamten Netzwerks abdecken. Dies bestätigt das oben gennante Pareto-Prinzip und zeigt, dass einige wenige thematische Gruppen eine dominante Rolle im vorliegenden Netzwerk spielen und dieses signifikant prägen. 
+
+Um die Übersichtlichkeit der nachfolgenden Analysen und Visualisierungen sowie die analytische Aussagekraft durch Fokus auf die zentralen Kernthemen zu gewährleisten, wird der Datensatz daher auf diese 18 dominanten Communities reduziert. Dieser fokussierte Datensatz repräsentiert die relevantesten Strukturen der thematischen Vernetzung des Netzwerks und ermöglicht eine detaillierte Untersuchung der spezifischen Rollen, Zentralitäten und internen Muster der wichtigsten Akteure, ohne die Ergebnisse durch die zahlreichen, peripheren und kleinen Gruppen zu verwässern. Die weiteren Analysen basieren somit ausschließlich auf diesen 18 dominanten Clustern. Dadruch können wir die spezifischen Rollen und internen Muster der wichtigsten Akteure detailliert untersuchen, ohne die Übersichtlichkeit oder statistiche Aussagekraft zu verlieren, da die zahlreichen, aber statistisch unbedeutenden peripheren Gruppen das Ergebnis verwässern würden. 
+
+```{r build top n dataset}
+top_n <- 18
+# neue Tabelle mit nur den Top-N Communities erstellen
+com_info_df <- com_info_df_all[1:top_n, ] 
+```
+
+Um die thematische Zusammensetzung und das relative Größenverhältnis dieser 18 dominanten Communities sichtbar zu machen, visualisiert die folgende Treemap die Größe und Thematik der zentralen Cluster. Hierfür wird der eben erstellte, auf die 18 größten Cluster reduzierte, Datensatz verwendet. Aus diesem werden die relevanten Spalten ausgewählt, ein passend formatiertes Label hinzugefügt und anschließend visualisiert. 
+
+```{r coms size treemap}
+# Daten für die Treemap vorbereiten
+tree_df <- com_info_df %>%
+  select(top_node, size) %>%  
+  mutate(label_text = paste0(top_node, "\n", size)) # Label erstellen
+
+# Treemap plotten
+tree_coms_size <- ggplot(tree_df, aes(area = size, fill = size, label = label_text)) +
+  geom_treemap(color = "black", size = 1) + # Umrandung der Boxen
+  
+  # Text in die Boxen setzen
+  geom_treemap_text(
+    colour = "white",
+    place = "centre",
+    grow = FALSE,   # Textgröße bleibt konstant
+    reflow = TRUE,  # Text wird umgebrochen
+    size = 14,
+    padding.x = grid::unit(3, "mm"), 
+    padding.y = grid::unit(3, "mm")
+  ) +
+  # Farbskala für die Boxen
+  scale_fill_gradient(
+    low = "#16CCE9",   
+    high = "#1662E9",
+    trans = "log10",  # angepasste Skala, da der Größenunterschied groß ist
+  ) +
+  labs(
+    title = "Größenverhältnisse der Top 18 Reddit-Communities",
+    plot.title = element_text(hjust = 0.5, size = 14)
+  ) +
+  theme(legend.position = "none") 
+
+tree_coms_size
+
+```
+
+Die Treemap visualisiert die Größenverhältnisse der 18 dominanten Communities Reddit-Netzwerk sowie zeigen die Namen der Knoten mit dem höchsten Grad jeder Community, um welches Themengebiet es sich in diesem Cluster handelt. Außerdem ist für jede Community neben ihrem Themengebiet auch die absolute Größe (Anzahl der zu dieser Community gehörenden Knoten) angegeben.
+
+Es ist erkennbar, dass die Gemeinschaft "askreddit" mit 6.776 Subreddits die deutlich größte ist und die nächstgrößten thematischen Cluster um ein Vielfaches übertrifft. Während weitere Gemeinschaften grundsätzlich einem spezialisierten Thema zugeordnet werden können und sich damit semantisch klar abgrenzen lassen, ist "askreddit" allgemeiner einzuordnen. Diese Dominanz ist analytisch schlüssig, da ein solcher allgemeiner Themen-Cluster als ein breit gefächertes Subreddit fungiert, in dem Nutzer Fragen zu einer Vielzahl von Themen stellen können und diese Gemeinschaft somit die Rolle als Generalist diverser Themen und Konnektor zwischen diesen einnimmt.
+
+Da "askreddit" nicht auf eine Nische beschränkt ist, kann man zudem vermuten, dass dieser Cluster die Kommunikationswege zwischen den spezialisierten, thematischen Subgruppen erleichtert und somit den Informationsfluss im Netzwerk maßgeblich prägt. Diese Vermutung sowie die konkreten Beziehungen von aksreddit zu anderen Clustern soll daher im folgenden untersucht werden. Angefangen wird hierbei mit der Darstellung verschiedenster Zentralitätsmerkmale der jeweiligen Gemeinschaften.
+
+Dies wird mit einem Parallele Koordinaten-Plot umgesetzt, da hiermit einfach und übersichtlich Unterschiede und Muster zwischen den Gemeinschaften über die verschiedenen Metriken hinweg fesgestellt werden können. Für diese Visualisierung werden (nach der Festlegung der Namen für die Achsenbschriftungen) verschiedene zentrale Merkmale ausgewählt. Da diese auf sehr unterschiedlichen Skalen liegen, werden die Daten jeder Metrik zwischen 0 (Minimum im Datensatz) und 1 (Maximum im Datensatz) skaliert. Die Sortierung und Benennung der Achsen wird zusätzlich angepasst und die Grafik anschließend generiert.
+
+```{r community metrics parallel coordinates plot}
+# Namen für die Achsen anpassen
+labels_map <- c(
+  "avg_in_deg"      = "Ø In-Degree",
+  "avg_out_deg"     = "Ø Out-Degree",
+  "avg_betweenness" = "Ø Betweenness",
+  "avg_eigenvector" = "Ø Eigenvector",
+  "avg_closeness"   = "Ø Closeness",
+  "density"         = "Dichte"
+)
+
+# Metriken auswählen und Daten vorbereiten
+par_data <- com_info_df %>%
+  select(
+    top_node,   # Für die Gruppierung
+    avg_in_deg, 
+    avg_out_deg, 
+    avg_betweenness, 
+    avg_eigenvector, 
+    avg_closeness,
+    density,
+  ) 
+
+plot_data <- par_data %>%
+  pivot_longer(cols = 2:6, names_to = "metric", values_to = "raw_value") %>%  # Spalten 2 bis 6 pivotieren, 1 ist top_node (für Gruppierung)
+  # nach Metrik gruppieren, um für die Werte dieser Metrik korrekt zu skalieren
+  group_by(metric) %>%  
+  mutate(
+    # Skalierung zwischen 0 (min. Wert der Metrik) und 1 (max. Wert der Metrik) für die Darstellung 
+    scaled_value = rescale(raw_value, to = c(0, 1)) 
+  ) %>%
+  ungroup()
+
+# Reihenfolge der Metriken festlegen und Namen der Achsen anpassen
+plot_data$metric <- factor(
+  plot_data$metric, 
+  levels = names(labels_map), # Reihenfolge der Metriken
+  labels = labels_map # angepasste Namen für die Achsen    
+)
+
+# Plot erstellen
+com_metrics <- ggplot(plot_data, aes(x = metric, y = scaled_value, group = top_node, color = top_node)) +
+  geom_line(alpha = 0.7) +
+  geom_point(aes(
+    # als Tooltip werden die rohen Werte angezeigt
+    text = paste0("<b>Community:</b> ", top_node, "<br>",
+                  "<b>", metric, ":</b> ", round(raw_value, 4)) 
+  )) +
+  scale_color_viridis_d(option = "turbo") +
+  theme_minimal() +
+  # Achsen und Titel beschriften
+  labs(
+    title = "Vergleich verschiedener Metriken der Top Communities",
+    y = "Normierter Wert (0 = Min, 1 = Max)",
+    x = "",
+    color = "Community"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 20, hjust = 0.5, face = "bold"), # geneigte x-Achsenbeschriftung
+    legend.spacing.y = unit(0.5, "cm"), # vertikaler Abstand zwischen Legenden-Einträgen
+    legend.key.height = unit(0.45, "cm"), # Höhe der Legenden-Einträge
+    plot.margin = margin(10, 10, 10, 10),
+    plot.title = element_text(hjust = 0.5, size = 14)
+  )
+```
+```{r plot community metrics, echo=FALSE}
+if (knitr::is_latex_output()) {
+  com_metrics
+} else {
+  ggplotly(com_metrics, tooltip = "text")
+}
+```
+
+In diesem Parallele-Koordinaten-Plot repräsentiert jede Linie eine der 18 zentralen Communities im Reddit-Netzwerk. Die Positionen der Linien auf den verschiedenen Achsen geben die normierten Werte der jeweiligen Metriken an. Die Werte wurden jeweils auf eine Skala von 0 bis 1 normiert, fährt man jedoch mit der Maus über die jeweiligen Punkte, können die tatsächlichen Werte abgelesen werden \textit{(nur in der html-Version möglich)}.
+
+Zunächst fällt bei der Betrachtung der Closeness-Zentralität auf, dass die visuellen Unterschiede im Plot stärker erscheinen, als es die absoluten Rohdaten vermuten lassen \textit{(nur in der html-Version erkennbar)}. Die Werte liegen über alle untersuchten Communities hinweg relativ eng beieinander (etwa im Bereich 0.18 bis 0.26). Alle Gemeinschaften sind also so vernetzt, dass die durchschnittliche Distanz zu allen anderen Communities ähnlich kurz ist, unabhängig von der Größe der Community. Das die großen Communities das Effizienzniveau kleinerer Communities halten können, ist eine interessante Erkentniss.
+
+Eine weitere interessante Struktur zeigt sich bei der größten Community "askreddit." Als Generalist dominiert diese Gruppe zwar bei den volumenbasierten Metriken (höchster In- und Out-Degree) sowie der Closeness, fällt jedoch bei den durchschnittlichen Betweeness und der durchschnittlichen Eigenvektor-Zentralität drastisch ab. Dies deutet darauf hin, dass trotz der hohen Kommunikation in der Gemeinschaft sowie mit anderen Gemeinschaften zentralen Hubs in dieser Gemeinschaft keine besonders große Rolle spielen, da die Vernetzung insgesamt äußerst ausgeprägt zu sein scheint. Dies ist insbesondere vor dem Hintergrund interessant, dass dennoch der Unterschied zwischen maximalem und durchschnittlichen Degree enorm ist, was eine solche Hub-Struktur vermuten ließ. Dass diese Hub-Struktur zumindest teilweise wiederlegt zu werden scheint, könnte auf die Größe des Netzwerks zurückzuführen sein, in welchem gegebenenfalls nur einige zentrale Hubs existieren, welche dadurch nur einen geringen Einfluss auf die Metrik haben. Die Community scheint jedenfalls auch neben einigen zentralen Hubs dennoch stark vernetzt zu sein, sowohl intern als auch extern.
+
+Im Gegensatz dazu weisen kleinere, spezialisierte Communities ausgeprägte interne Ordnungen auf. Communities wie fitness, help, oder zeigen auffällige Spitzen bei der Betweenness, was auf eine hierarchische interne Struktur schließen lässt. In diesen Gemeinschaften fungieren wenige zentrale Knoten als notwendige Brücken für die Interaktion. Eine interessante Struktur zeigt sich bei "anime": Hier ist eine besonders starke Differenz zwischen Closeness und Betweenness/Eigenvektor-Zentralität erkennbar, was darauf hindeutet, dass in dieser Gemeinschaft einige zentrale Knoten eine besonders große Rolle spielen, dieses Netzwerk aber ansonsten weniger stark vernetzt ist. Auch bei "help" zeigt sich eine interessanteres scheinbares Paradoxon, durch eine hohe Betweenness, jedoch eine vergleichsweise geringe Eigenvektor-Zentralität. Dies könnte bei einer Art "Stern-Topologie" der Fall sein, in welcher zentrale Hubs verschiedene Subreddits (bei "help" z.B. Ratsuchende) miteinander verknüpfen. Diese Hubs haben eine zentrale Stellung im Informationsfluss, haben jedoch hauptsächlich nur Akteure mit geringerem Einfluss. Bei "help" ist zudem eine hohe Differenz zwischen eingehendem und ausgehendem Grad erkennbar, was darauf zurückzuführen sein könnte, dass es sich hier um eine Art "Helpdesk" handelt, welche anderen Communities hilft und damit hier mehr ausgehende Verbindungen existieren.
+
+Eine bemerkenswerte Sonderstellung nimmt die Community "nfl" ein. Sie ist die einzige Gruppe, die in fast allen Dimensionen Spitzenwerte erreicht. Trotz einem äußerst hohen In- und Out-Degree, gleichzustellend mit dem der "askreddit"-Community ist hier eine ausgeprägten internen Ordnung mit hohe Betweenness und maximaler Eigenvector-Zentralität erkennbar. Dies deutet auf eine extrem aktive, aber gleichzeitig qualitativ hochwertig vernetzte und gut strukturierte Gemeinschaft hin.
+
+Übergreifend ist dabei festzustellen, dass In- und Out-Degree grundsätzlich stark miteinander korrellieren, was belegt, dass aktive Communities in der Regel sowohl als "Sender" als auch als "Empfänger" im Informationsfluss fungieren.
+
+Insgesamt ist festzuhalten, dass singnifikante Unterschiede zwischen Communities und deren interne Struktur und Organisation bestehen. Die Vernetzung in den jeweiligen Gemeinschaften sowie mit anderen Communities variiert stark, während zudem die internen Hierarchien unterschiedlich ausgeprägt sind. Bei einigen Gemeinschaften scheinen dabei Hubs eine zentrale Hubs eine große Rolle zu spielen, während bei anderen eine flache Hierarchie mit breiter Vernetzung zu existieren scheint. Dies deutet auf unterschiedliche Rollen und Funktionen der Subreddits im Gesamtnetzwerk hin.
+
+Um zu überprüfen, ob diese individuellen Unterschiede systematischen Mustern folgen, wird der Blick nun von der Einzelanalyse auf die strukturellen Abhängigkeiten einiger zentraler Community-Eigenschaften im Netzwerk erweitert. Besonders von Interesse ist hierbei die Frage, inwiefern die Größe einer Community deren Vernetzungsdichte und Aktivitätsniveau determiniert und ob diese Eigenschaften mit der Rolle von Hubs korrelieren. Für diese Analyse wird ein Bubble-Chart erstellt, welcher die Dichte auf der x-Achse (logarithmische Skala) und den durchschnittlichen allgemeinen Grad der Knoten auf der y-Achse visualisiert. Die Größe einer Bubble repräsentiert dabei die Größe der Community, während die Farbe die Rolle von Hubs in Form der maximalen Betweenness (normiert) darstellt. Es wird die normierte maximale Betweenness betrachtet, um den Größeneffekt herauszurechnen. So wird sichergestellt, dass die Kennzahl die tatsächliche strukturelle Zentralisierung misst und nicht lediglich die Größe des Netzwerks wiederspiegelt.
+
+```{r community density degree bubble chart}
+den_deg_sp <- ggplot(com_info_df,
+       aes(x = density, 
+           y = avg_degree, 
+           size = size,
+           color = max_betweenness,
+           text = paste0("<b>Community:</b> ", top_node, "<br>",
+                         "<b>Größe:</b> ", size, " Subreddits<br>",
+                         "<b>Dichte:</b> ", round(density, 4), "<br>",
+                         "<b>Ø Degree:</b> ", round(avg_degree, 2), "<br>",
+                         "<b>Max. Betweenness:</b> ", round(max_betweenness, 2)  # Tooltip Text für interaktive Version
+           ))) +
+  # Punkte plotten
+  geom_point(alpha = 0.6) +
+  # Trendlinie hinzufügen
+  geom_smooth(method = "lm", se = FALSE, color = "red", inherit.aes = FALSE,
+            aes(x = density, y = avg_degree)) +
+  # Skalierung für Größe der Punkte
+  scale_size_continuous(
+    range = c(2, 15),
+    name = "Community-Größe"
+  ) +
+  # Farbe der Punkt
+  scale_color_viridis_c(
+    option = "plasma", 
+    name = "Max. Betweeness\n(Hub-Stärke)",
+    end = 0.9, # vor der vollen Intensität aufhören, um zu helle Farben zu vermeiden
+    trans="log10",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5 # zentriert Titel über dem Balken
+    )) +
+  # Logarithmische x-Achse, da die Dichte stark varieert ("nfl" mit hoher Dichte)
+  scale_x_log10(
+    labels = scales::number_format(accuracy = 0.001), # normale Zahlen statt "5e-04"
+  ) +
+  # Beschriftungen für Achsen und Titel hinzufügen
+  labs(
+    x = "Dichte der Community",
+    y = "Durchschnittlicher Degree der Community",
+    title = "Dichte vs. Durchschnittlicher Degree der Top-20 Communities",
+    subtitle = "Größe = Anzahl Subreddits, Farbe = höchste Betweenness"
+  ) +
+  theme_minimal() 
+```
+```{r plot community density degree bubble chart, echo=FALSE}
+if (knitr::is_latex_output()) {
+  # für PDF Ausgabe Labels anpassen, damit sie sich nicht überlappen
+  den_deg_sp + geom_text_repel(
+    aes(label = top_node),
+    size = 3,
+    box.padding = 0.6,
+    point.padding = 0.2,
+    color = "black",
+    force = 1, # wie stark sich Labels abstoßen
+    max.overlaps = Inf    
+  )
+} else {
+  # Labels hinzufügen (seperat, da für die PDF Ausgabe Labels anders hinzugeügt werden)
+  den_deg_sp_label <- den_deg_sp + geom_text(aes(label = top_node), vjust = -1, size = 2.8, color="black")
+  ggplotly(den_deg_sp_label, tooltip = "text")
+}
+```
+
+Betrachtet man die Verteilung der Communities im Raum, so zeigt sich, dass kein einfacher linearer Zusammenhang zwischen der Dichte einer Community und dem durchschnittlichen Grad ihrer Knoten besteht. Die eingezeichnete Trendlinie deutet zwar einen leichten Abfall an, jedoch ist die wissenschaftliche Aussagekraft aufgrund der logarithmische x-Achse und erkennbaren Ausreißern begrenzt. Vielmehr offenbart die Visualisierung zwei fundamental unterschiedliche Strukturtypen im Reddit-Netzwerk, welche auf unterschiedliche Rollen und Funktionen schließen lassen.
+
+Eine markante Beobachtung liefert erneut "askreddit". Die Community weist den höchsten durchschnittlichen Grad auf, liegt jedoch bei der Dichte im untersten Bereich. Dass bei wachsenden Netzwerken die Dichte abnimmt, ist mathematisch schlüssig, da die Anzahl an möglichen Verbindungen exponentiell zunimmt und somit eine vollständige Vernetzung nahezu unmöglich wird. Die Tendenz der geringeren Dichte bei zunehmender Größe ist hier allgemein erkennbar. Die dunkelviolette Färbung der "askreddit"-Bubble signalisiert zudem eine geringe Hub-Dominanz (normierte maximale Betweenness), was ebenfalls analytisch plausibel ist, da die Last der Interaktion ist hier breit verteilt ist und nicht von einzelnen zentrlaen Knoten "monopolisiert" wird.
+
+Im Kontrast dazu steht die Community „nfl“ im oberen rechten Quadranten. Auch diese Gemeinschaft weist einen hohen durchschnittlichen Grad der Knoten auf, besitzt jedoch gleichzeitig eine außergewöhnlich hohe Dichte. Dies könnte zwar einerseits auf die geringere Größe zurückzuführen sein, jedoch weist sie dennoch eine fast doppelt so hohe Dichte wie die nächst-dichteste Gemeinschaft (mit einer ähnlichen Größe) auf. Dies ist ein starker Indikator für eine Comunity, in der eine hohe interne Geschlossenheit und starke Kommunikation herrscht. Die Hub-Stärke ist dabei insbesondere im Vergleich zu anderen Communities ähnlicher Größe verhältnismäßig niedrig ausgeprägt, was auf eine flache Hierarchie mit einer umfassenden direkten Kommunikation zwischen den Akteuren schließen lässt.
+
+Hinsichtlich der Hub-Stärke lässt sich generell erkennen, dass kleinere oder weniger aktive Communities tendenziell eine höhere maximale Betweenness aufweisen. Dies legt nahe, dass in solchen Gemeinschaften Hubs eine stärkere Rolle spielen, jedoch ist auch dies analytisch schlüssig, da sich bei größeren Netzwerken vermutlich häufig mehrere Hubs entwickeln und nicht mehr ein zentraler Knoten existiert, welcher das komplette Netzwerk verbindet. Ein interessanter Ausreißer ist hierbei "iama". Trotz der signifikanten Größe zeigt dieese Community eine vergleichsweise hohe maximale Betweenness, was auf eine steile Hierarchie mit einer hohen Relevanz von zentralen Hubs hindeutet.
+
+Ein weiterer aufschlussreicher Aspekt, welcher sich aus dieser Visualisierung ableiten lässt, ist, dass einige Communities trotz ähnlicher Größe und Dichte einen unterschiedliche durchschnittlichen Grad aufweisen (z.B. "india" und "leagueoflegends"). Da die Dichte nur die interne Vernetzung misst, der Grad hier aber global berechnet wurde, lässt dies darauf schließen, dass die Communities intern ähnlich stark vernetzt sind, der höhere Grad jedoch auf eine stärkerer Kommunikation mit anderen Communities zurückzuführen ist.
+
+Zusammenfassend lässt sich festhalten, dass die Größe einer Community zwar stark mit ihrer Dichte korreliert, aber nicht ihr Aktivitätsniveau oder ihre interne Struktur diktiert. Es existieren einige sehr stark vernetze, dezentrale Gruppen, während andere, ofmtals kleinere Communities häufig zentrale Hubs aufweisen. Größere Netzwerke trennen sich in der Regel von dieser Abhängigkeit und weißen eine flachere Hierarchie auf.
+
+Die Analyse hat gezeigt, dass einige Communities trotz ähnlicher interner Vernetzung völlig unterschiedliche Aktivitätsmuster aufweisen (Bsp. "india" und "leagueoflegends"). Dies legt nahe, dass wesentlich Unterschiede in der Kommunikation zwischen existieren. Um diese These zu prüfen und näher zu verstehen, wer mit wem kommuniziert, wird im abschließenden Schritt ein Chord Diagramm erstellt, der die Interkation zwischen den Clustern visualisiert. Es wird für diese Visualisierung außerdem die Sentiment-Informationen der Kanten verwendet, indem die Stimmung der Kommunikation zwischen den Communities farblich gekennzeichnet wird.
+
+Um dies zu realisieren, wird zuerst ein aggregierter Kanten-Datensatz erstellt, welcher die Verbindungen zwischen den Communities zusammenfasst. Hierfür wird für jede Kante im ursprünglichen Graphen überprüft, zu welchen Communities die verbundenen Knoten gehören und anschließend nur die Kanten beibehalten, welche zwischen verschiedenen Communities verlaufen. Die Gewichte der Verbindungen zwischen zwei Communities werden summiert und die Stimmung wird gemittelt. Diese dienen später für die Bestimmung der Breite und Farbe der Verbindungen. Methodisch wurde hierbei bewusst die Summe der Kantengewichte als späteres Maß für die Breite der Verbindungen gewählt und nicht der Durchschnitt. Hierdurch werden große Communities zwar allein durch ihre Größe eine stärkere Verbindung zu anderen Communities haben, jedoch liegt der Fokus auf der Abbildung des absolute Kommunikationsvolumen abzubilden und nicht auf der Darstellung der Intensität der Verbindungen zwischen Communities. Es wird für den Aufbau des Kanten-Datensatz außerdem ein ungerichteter Graph verwendet, da der Fokus auf die Gesamtintensität der Interaktion und der vorherrschende Tonalität liegen soll, unabhängig von der Richtung des Austauschs.
+
+```{r build hub dataset}
+# für jeden Knoten zugehörigkeit zur Community in einem Dataframe speichern
+node_communities <- data.frame(
+  node = V(gc_und)$name,
+  community_id = V(gc_und)$community
+) %>%
+  mutate(community_id = as.integer(community_id))
+
+# Kanten des Graphen in ein Dataframe umwandeln
+edges_df <- igraph::as_data_frame(gc_und, what = "edges")
+
+edges_comm <- edges_df %>%
+  left_join(node_communities, by = c("from" = "node")) %>% # Dataframe mit from Community ID erweitern
+  rename(comm_from = community_id) %>%    # community_id Spalte in comm_from umbenennen
+  left_join(node_communities, by = c("to" = "node")) %>%  # Dataframe mit to Community ID erweitern
+  rename(comm_to = community_id) %>%  # community_id Spalte in comm_to umbenennen
+  filter(comm_from != comm_to)  # nur cross-community Kanten behalten
+
+# Kanten zwischen Communities aggregieren, indem die Verbindungen gezählt und die Gewichte summiert werden
+comm_edges <- edges_comm %>%
+  group_by(comm_from, comm_to) %>%
+  summarise(
+    # Gewichteter Durchschnitt der Sentiments, da Kanten mit höherem Gewicht mehr Einfluss haben sollten
+    sentiment = weighted.mean(sentiment, weight, na.rm = TRUE),
+    weight = sum(weight), 
+    .groups = "drop" # drop groups after summarise
+  ) %>%
+  mutate(comm_from = as.integer(comm_from),
+         comm_to   = as.integer(comm_to)) %>%
+  filter(weight > 18)  # nur Kanten mit Gewicht > 0 behalten, um den Graphen übersichtlich zu halten
+```
+```{r show hub edges table, echo=FALSE}
+head(comm_edges) %>%
+  kable(
+    format = ifelse(knitr::is_latex_output(), "latex", "html"), 
+    caption = "Datensatz der aggregierten Community-Kanten für den HEB-Graphen",
+    booktabs = TRUE
+  ) %>%
+  kable_styling(
+    full_width = FALSE, 
+    bootstrap_options = c("striped", "hover", "condensend"),
+    latex_options = c("striped", "hold_position", "scale_down")
+    )
+```
+
+Auf diesem Datensatz basieren kann nun das Chord Diagramm erstellt werden. Hierfür werden zuerst die Community IDs durch die lesbaren Namen der Top-Knoten ersetzt. Anschließend werden Verbindungen in beide Richtungen zwischen zwei Communities zusammengefasst, um einen ungerichteten Graphen zu erstellen. Nachdem die Farben für Kanten und Knoten festgelegt wurden, kann abschließend das Chord Diagramm mit den entsprechenden Einstellungen und Anpassungen erstellt werden.
+
+```{r create chord diagram}
+# Community IDs werden lesbare Namen zugewiesen
+map_names <- com_info_df_all %>%
+  mutate(community_id = as.integer(community_id)) %>%
+  select(community_id, top_node)
+
+# Bei der Kantenliste IDs durch Namen ersetzen
+cd_names <- comm_edges %>%
+  left_join(map_names %>% rename(name_from = top_node), 
+            by = c("comm_from" = "community_id")) %>%
+  left_join(map_names %>% rename(name_to = top_node), 
+            by = c("comm_to" = "community_id")) %>%
+  select(from = name_from, to = name_to, weight, sentiment)
+
+# doppelte Stränge zusammenfassen, um einen ungerichteten Graphen zu ertellen
+cd_data <- cd_names %>%
+  rowwise() %>%  # jede Zieile einzeln bearbeiten
+  mutate(
+    # from/to alphabetisch sortieren, damit A->B und B->A identisch werden
+    u_from = sort(c(from, to))[1],
+    u_to   = sort(c(from, to))[2]
+  ) %>%
+  group_by(u_from, u_to) %>%
+  summarise(
+    weight = sum(weight), # Gewichte addieren
+    sentiment = mean(sentiment), # Stimmung mitteln
+    .groups = "drop"
+  ) %>%
+  rename(from = u_from, to = u_to)
+
+# Farben für Kanten basierend auf Sentiment erstellen
+col_func_edge <- col_numeric(
+  palette = c("#981A62", "#d8f20d", "#1a9850"), 
+  domain = c(-1, 1)
+)
+cd_data$color <- col_func_edge(cd_data$sentiment) # Neue Spalte mit Hex-Code hinzufügen
+
+# Palette für Knotenfarben erstellen
+unique_nodes <- unique(c(cd_data$from, cd_data$to))
+node_colors <- colorRampPalette(brewer.pal(12, "Set3"))(length(unique_nodes))
+
+# Dataframe für Knoten und deren dazugehörige Farben erstellen
+cd_nodes <- data.frame(
+  id = unique_nodes,
+  color = node_colors
+)
+
+# Chord Diagramm erstellen
+chord_d <- hchart(cd_data, "dependencywheel", 
+       hcaes(from = from, to = to, weight = weight, color = color)) %>% # hier Farbe für Kanten
+  hc_add_series(
+    nodes = cd_nodes, # Knoten Farbe definieren
+    name = "Interaktion",
+    dataLabels = list(
+      enabled = TRUE,
+      style = list(fontSize = "14px", textOutline = "none") # Namen besser lesbar machen
+    )
+  ) %>%
+  # Achsen ausblenden
+  hc_xAxis(visible = FALSE) %>%
+  hc_yAxis(visible = FALSE) %>%
+  # Titel und Tooltip anpassen
+  hc_title(text = "Vernetzung und Interkation der Communities") %>%
+  hc_tooltip(
+    headerFormat = "",
+    # Tooltip Text und Format anpassen
+    pointFormat = "<b>{point.from}</b> ↔ <b>{point.to}</b><br>Weight: {point.weight}<br>Sentiment: {point.sentiment:.2f}"
+  ) %>%
+  hc_add_theme(hc_theme_smpl())
+
+chord_d
+```
+
+Das Chord Diagramm \textit{(nur in der html-Version sichtbar)} zeigt die Interaktionen zwischen den allen identifizierten Communities im Reddit-Hyperlink-Netzwerk. Die Knoten repräsentieren die einzelnen Communities, während die Kanten die Kommunikationsverbindungen zwischen diesen darstellen. Die Breite der Kanten entspricht dem Volumen der Interaktion, während die Farbe die Stimmung der durchschnittliche Interaktionen widerspiegelt, wobei Rot für eine negative, Gelb für eine neutrale und Grün für eine positive Gesamststimmung steht.
+
+Der erste Blick auf das Diagramm bestätigt eindrucksvoll die bereits im Bubble-Chart vermutete Sonderstellung von „askreddit“. Der blaue Sektor dieser Community dominiert das Diagramm und nimmt optisch fast ein Viertel des gesamten Kreisumfangs ein. Dies verdeutlicht, dass „askreddit“ nicht nur intern aktiv ist, sondern auch an einem Großteil der Interkationen im Gesamten Netzwerk beteiligt ist. Für viele andere Communities, wie z.B. „legaladvice“ oder „iama“ oder "india", macht der Austausch mit „askreddit“ oft mehr als 50 % ihres gesamten externen Volumens aus. Dies stellt "askreddit" als ein zentraler "genereller Hub" heraus, der als übergeordnetes Forum für den Austausch von Informationen zwischen verschiedenen spezialisierten Communities dient. Dies könnte auch eine weitere Erklärung dafür sein, warum "askreddit" wie im Bubble Chart zu erkennen war, einen hohen durchschnittlichen Grad, jedoch eine geringere Dichte aufweist: Die Community hat viele externe Verbindungen, was zwar in die Metrik des durschnittlich Grads, jedoch nicht das der Dichte einfließt.
+
+Entgegen der oft vorherrschenden Meinung, Soziale Medien seien primär durch Konflikte geprägt, zeigt sich das Netzwerk als überraschend positiv durch überwiegend grüne Verbindungen. Dennoch zeigen sich bei genauerer Betrachtung signifikante Unterschiede in der „Beziehungsqualität“. Während das Gesamtnetzwerk sehr harmonisch wirkt, weist „askreddit“ im Vergleich die meisten Verbindungen mit niedrigeren Sentiment-Werten auf. Ein Beispiel ist die starke Verbindung zu „legaladvice“ mit einem Score von 0,69. Zwar entspricht dies immer noch einem Anteil von rund 84,5 % positiven Nachrichten, doch im Vergleich zu anderen Community-Paaren ist dieser Wert verhältnismäßig niedrig. Dies könnte sich plausibel auf die enorme Größe und thematische Breite zurückführen lassen. In dieser Community treffen Millionen Nutzer aus unterschiedlichen thematisch spezialisierten Nischen mit unterschiedlichsten Meinungen aufeinander, wodurch hier das Konfliktpotenzial naturgemäß höher als zwischen ausschließlich zwei thematischen Gebieten ist. Im Gegensatz dazu besteht die positivste Verbindung zwischen "askreddit" und einer anderen Community mit "enterpreneur". Dies ist eine äußerst interessante Beobachtung und könnte damit zusammenhängen, dass Unternehmer diesen zentralen Hub als eine Art Marktforschung verwenden oder auch dort für eigene Produkt werben. Weiterführend zeigen spezialisierte oder thematisch verwandte Communities oft extrem positive Verbindungen. Beispielsweise extieren Verbindungen zwischen „fitness“ und „trees“ (Score 1,0) oder zwischen den Sport-Communities „hockey“ und „nfl“ (Score 0,98)  oder auch "leagueoflegends" und "games" (Score 0,91) sind nahezu ausschließlich positiv.
+
+Abschließend ergänzt das Chord-Diagramm die vorangegangenen Analysen um die entscheidende Dimension der direkten Interaktion zwischen den Communities. Die Visualisierung verdeutlicht, dass das Reddit-Netzwerk keine Ansammlung isolierter Inseln darstellt, sondern als ein hierarchisch organisiertes System fungiert. An der Spitze steht dabei „askreddit“ als zentraler "Verteilerknoten", der das gesamte Netzwerk verbindet und damit den globalen Kommunikations essenziell ist. Gleichzeitig zeigt sich hier aufgrund der thematischen Heterogenität ein vergleichsweise höheres Konfliktpotenzial als im Rest des Netzwerks. Im Gegensatz dazu weisen die spezialisierten Nischen-Communities überwiegend positive Interaktionsmuster auf. Dies verdeutlicht, dass harmonische Interaktionen vor allem dort entstehen, wo thematische Nähe und gemeinsame Interessen bestehen, während breite, weniger spezifische Schnittstellen eher anfälliger für Reibungspunkte sind.
+
+
+
+# Ergebnisdiskussion und Ausblick
+
+## Interpretation der Ergebnisse
+
+Die durchgeführte Analyse des Reddit-Hyperlink-Netzwerks liefert signifikante Erkenntnisse über die Organisationsstruktur digitaler Netzwerke und beantwortet die eingangs formulierte Forschungsfrage nach den zentralen Akteuren und der Vernetzungsstruktur differenziert.
+
+Zunächst bestätigen die berechneten globalen Metriken, insbesondere die geringe Dichte in Kombination mit kurzen Pfadlängen, dass Reddit die klassischen Eigenschaften eines „Small-World-Netzwerks“ aufweist. Das Netzwerk ist dabei modular aufgebaut, was durch einen Modularitätswert von über 0,6 belegt wird. Dies impliziert, dass sich Nutzer primär in thematisch abgegrenzten Communities organisieren. Trotz dieser thematischen Unterteilung bleibt das Gesamtnetzwerk durch einige sehr stark vernetzte Hubs verbunden. Es existieren dabei einige sehr große Gemeinschaften, welche einen Großteil des gesamten Netzwerks ausmachen. Dies wurde durch die durchgeführte Pareto-Analyse veranschaulichte. Lediglich 18 Communities reichen aus, um etwa 80 % der topologischen Struktur des Netzwerks zu erklären, während die 30 kleinsten Communities nicht mal 1% ausmachten.
+
+Innerhalb dieser Kernstruktur konnte eine klare funktionale Arbeitsteilung der Communities identifiziert werden. Auf der einen Seite steht sozusagen ein Generalist, vertreten durch die "askreddit"-Community. Diese fungiert als zentraler Verteilerknoten mit dem höchsten Grad, weist jedoch gleichzeitig eine vergleichsweise geringe interne Dichte auf. "askreddit" dient somit als zentraler Ort für den Austausch zwischen verschiedensten Themengebieten. Die Sentiment-Analyse zeigte hier jedoch das größte Konfliktpotenzial durch einen höheren Anteil negativer Links, was auf die unterschiedlichen Meinungen verschiedener Nutzergruppen hindeutet, welche hier aufeinandertreffen. Dem gegenüber stehen die Themen-Nischen, welche jedoch sehr unterschiedliche Strukturen aufwiesen. Einige Communities, wie biepielsweise "nfl", schienen intern extrem dicht vernetzt zu sein während andere Communities genau gegenteilige Eigenschaften aufwiesen Auch der interne strukturelle Aufbau, biespielsweise die Rolle von Hubs, zwischen solchen Communities ließ starke Unterschiede erkennen.
+
+Des Weiteren widerlegt die kantenbasierte Sentiment-Analyse das Vorurteil, Soziale Medien seien primär durch Toxizität geprägt. Das Netzwerk ist überwiegend durch positive Interaktionen gekennzeichnet, die im Chord-Diagramm als grüne Verbindungen sichtbar wurden. Strukturell konzentrieren sich negative Interaktionen vornehmlich auf die Schnittstellen zwischen "askreddit" als großem Generalisten den themenpezifischen Subreddits, während thematisch verwandte Nischen fast ausschließlich harmonisch interagieren. Topologisch stellt Reddit ein hochmodulares, hierarchisches Netzwerk dar, bei welchem einige zentrale Hubs den Informationsfluss maßgeblich prägen. Einige Hubs in der "askreddit"-Gemeinschaft sind dabei besonders zentral, da sie einen Großteil des Netzwerkes miteinander verbinden. Diese sind zwar aufgrund ihres hohen Grades und ihrer zentralen Lage essenziell für die globale Konnektivität des Gesamtnetzwerks, weisen aber gleichzeitig im Vergleich zu spezialisierten Nischen-Communities das größte Konfliktpotenzial auf.
+
+
+## Ausblick für zukünftige Arbeiten
+
+Obwohl die vorliegende Arbeit die statische Struktur des Reddit-Netzwerks umfassend beleuchtet hat, ergeben sich aus dieser Untersuchung diverse Anknüpfungspunkte für weiterführende Forschungen. Da die aktuelle Analyse das Netzwerk als statischen Graphen betrachtet hat, wäre eine Untersuchung der Entwicklungen der Strukturen, Eigenschaften und Topologie des Netzwerks über die Zeit ein logischer nächster Schritt. Hierbei könnte erforscht werden, wie sich Communities im Zeitverlauf bilden, wachsen oder auflösen, wobei insbesondere die Frage interessant ist, ob negative Interaktionen zu Abspaltungen von Communities führen.
+
+Ein weiterer vielversprechender Ansatz liegt in der inhaltlichen Tiefenanalyse. Während diese Arbeit die Existenz von Hyperlinks und deren grobes Sentiment nutzte (nur 1 oder -1, keine Abstufungen), blieb der eigentliche Textinhalt unberücksichtigt. Zukünftige Arbeiten könnten mittels Natural Language Processing (NLP) untersuchen, welche Intention hinter den Verlinkungen steht, um eine umfangereichere und detailliertere Sentimentanalyse durchführen zu können. Ergänzend dazu könnte der Fokus auf die Ermittlung der Nutzer-Struktur gesetzt werden, wobei untersucht werden soll, ob die im Hyperlink-Graphen festgestellte thematische Nähe bei Subreddits einer Community auch einer tatsächlichen sozialen Nähe der Personen entspricht. Hierfür könnte beispielsweise untersucht werden, in welchen Communities dieselben Nutzer aktiv sind und wie diese dort interagieren.
+
+Abschließend legt die identifizierten Anomalie einiger Communities wie "nfl" oder "askreddit" nahe, dass unterschiedliche Klassen von Hubs existieren. Hier könnte eine tiefergehende Analyse durchgeführt werden, bei welcher Rollen und Eigenschaften der einzelnen Communities sowie die konkrete Organisation einzelner Communities und deren internes Stimmungsbild näher untersucht werden. Es könnte hierbei beispielsweise untersucht werden, ob die Funktion der Community (z.B. Diskussion, Information oder Support)  mit der Organisation der Community korreliert. Die Netzwerkanalyse von Reddit bleibt somit ein vielversprechendes Feld, um das menschliche Sozialverhalten in digitalen Räumen quantitativ und qualitativ zu erforschen.
+
+
+\clearpage

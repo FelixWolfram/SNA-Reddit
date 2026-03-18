@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Project Files
+Screenshots/
+.Rhistory
+~$ Erklärung SNA Felix Wolfram.docx
+KI Erklärungen SNA Felix Wolfram.pdf
